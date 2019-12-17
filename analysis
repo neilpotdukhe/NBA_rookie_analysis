@@ -1,0 +1,722 @@
+'''
+Background and Motivation:
+I have always wondered what contributes to a rookies success in the NBA. Talent only takes a 
+player so far in the NBA. Some of arguably, most talented basketball players coming into the NBA,
+were labeled as "busts" because their play did not carry over to the NBA. I will do an analysis 
+later to determine how often number one picks fell beneath their high expectations. I was 
+interested to see what types of "situations" could relate to success for rookies. For example, 
+some of my hypothesis's were: teams with above average assists, points, rebounds, or field goal 
+percentage would correlate to a rookie's success. First, I had to figure out what made a rookie 
+"successful" in the NBA. To do this, I used a variety of career stats and assigned a weight to 
+each stat to generate a score. I will go over in more detail what stats and weights I used in 
+this score assignment. I then wanted to see how college play would carry over to NBA play. 
+'''
+
+import xlrd 
+import xlwt
+import xlrd
+from xlwt import Workbook 
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import odeint
+from scipy.stats import percentileofscore
+from statistics import mean
+from numpy import cov
+import pandas as pd
+from scipy.stats import pearsonr
+from pylab import plot, show, savefig, xlim, figure, ylim, legend, boxplot, setp, axes
+
+'''
+ The following cell had my excel file of data. The first sheet contained the draft class from 2008
+- 2017 and their corresponding stats and data in the NBA. The next 10 sheets contained the data of 
+all 30 teams in the NBA from 2008 - 2017. I got both these data sets from different sources.
+'''
+
+file_location = ("/Users/neilpotdukhe/Library/Containers/com.microsoft.Excel/Data/Desktop/Python_Files/nba_draft_data.xlsx")
+
+workbook = xlrd.open_workbook(file_location)
+data = workbook.sheet_by_index(0)
+df = pd.read_excel (r"/Users/neilpotdukhe/Library/Containers/com.microsoft.Excel/Data/Desktop/Python_Files/nba_draft_data.xlsx") 
+df.head() #example snippet of data
+
+#games played data
+games_played = []
+for i in range(1,301): #traverse through the excel file 
+
+    if type(data.cell_value(i,5)) == str: #if the cell is empty then don't append to list
+        continue
+    games_played.append(data.cell_value(i,5))
+np_games_played = np.array(games_played) #converting into numpy array for percentile calculation
+
+#min played data
+min_played = []
+for i in range(1,301):
+    if type(data.cell_value(i,6)) == str:
+        continue
+
+    min_played.append(data.cell_value(i,6))
+
+np_min_played = np.array(min_played)
+
+#player data
+players = []
+for i in range(1,301):
+    if len(data.cell_value(i,2)) == 0:
+        continue
+    players.append(data.cell_value(i,2))
+
+
+  
+#fg% data
+fg_perc = []
+for i in range(1,301):
+    if type(data.cell_value(i,10)) == str:
+        continue
+    fg_perc.append(data.cell_value(i,10))
+np_fg_perc = np.array(fg_perc)
+#3pt% data
+three_perc = []
+for i in range(1,301):
+    if type(data.cell_value(i,11)) == str:
+        continue
+    three_perc.append(data.cell_value(i,11))
+np_three_perc = np.array(three_perc)
+
+
+#avg points data
+avg_points = []
+for i in range(1,301):
+    if type(data.cell_value(i,14)) == str:
+        continue
+    avg_points.append(data.cell_value(i,14))
+np_avg_points = np.array(avg_points)
+
+#avg rebounds data
+avg_rebounds = []
+for i in range(1,301):
+    if type(data.cell_value(i,15)) == str:
+        continue
+    avg_rebounds.append(data.cell_value(i,15))
+np_avg_rebounds = np.array(avg_rebounds)
+
+#avg assists data
+avg_assists = []
+for i in range(1,301):
+    if type(data.cell_value(i,16)) == str:
+        continue
+    avg_assists.append(data.cell_value(i,16))
+np_avg_assists = np.array(avg_assists)
+
+#box +- data
+box_plus_minus = []
+for i in range(1,301):
+    if type(data.cell_value(i,17)) == str:
+        continue
+    box_plus_minus.append(data.cell_value(i,17))
+np_box_plus_minus = np.array(box_plus_minus)
+
+#Win share data
+win_shares = []
+for i in range(1,301):
+    if type(data.cell_value(i,18)) == str:
+        continue
+    win_shares.append(data.cell_value(i,18))
+np_win_shares = np.array(win_shares)
+
+#value over replacement data
+value_over_replacement = []
+for i in range(1,301):
+    if type(data.cell_value(i,20)) == str:
+        continue
+    value_over_replacement.append(data.cell_value(i,20))
+np_value_over_replacement = np.array(value_over_replacement)
+
+
+'''
+Next, I created a function that would take a players stats as parameters and return a score.
+The total weight of the player's stats would be 10, and each stat had a different weight. 
+I determined what the weights would be based on how they attribute to a players success, 1 being
+an average determinant. For example, how many minutes played is a below average determinant 
+whereas value over replacement is a very good determinant.
+
+Games Played : 0.5
+Min Played = : 0.5  
+FG percentage = 1.5 
+3 point percentage = 0.5
+Points per game = 1
+rebound avg = 0.5
+assists avg = 0.5
+Box plus minus = 0.5
+win shares = 1.5
+value over replacement = 1.5
+
+*Box +- uses a player's box score information and the team's overall performance to estimate a
+player's performance relative to league average.
+*Win shares is a player statistic which attempts to divvy up credit for team success to the 
+individuals on the team.
+*Value over replacelment is an estimate of each player's overall contribution to the team, 
+measured vs. what a theoretical "replacement player" would provide, where the "replacement 
+player" is defined as a player on minimum salary or not a normal member of a team's rotation.
+'''
+def assign_score(np_games_played, np_min_played, np_fg_perc, np_three_perc, np_avg_points, np_avg_rebounds, np_avg_assists, np_box_plus_minus, np_win_shares, np_value_over_replacement, games_played, min_played, fg_percent, three_point_percent, avg_points, avg_rebound, avg_assists, box_plus_min, win_share, value_over_player):
+    games_played_percentile = percentileofscore(np_games_played,games_played)
+    min_played_percentile = percentileofscore(np_min_played,min_played)
+    fg_perc_percentile = percentileofscore(np_fg_perc,fg_percent)
+    three_perc_percentile = percentileofscore(np_three_perc, three_point_percent)
+    avg_points_percentile = percentileofscore(np_avg_points, avg_points)
+    avg_rebounds_percentile = percentileofscore(np_avg_rebounds, avg_rebound)
+    avg_assists_percentile = percentileofscore(np_avg_assists, avg_assists)
+    box_plus_minus_percentile = percentileofscore(np_box_plus_minus, box_plus_min)
+    win_shares_percentile = percentileofscore(np_win_shares, win_share)
+    value_over_replacement_percentile = percentileofscore(np_value_over_replacement, value_over_player)
+    score = (games_played_percentile - .5) * .5
+    score += (min_played_percentile - .5) * .5
+    score += (fg_perc_percentile - .5) * 1.5
+    score += (three_perc_percentile - .5) * .5
+    score += (avg_points_percentile - .5) * 1
+    score += (avg_rebounds_percentile - .5) * .5
+    score += (avg_assists_percentile - .5) * .5
+    score += (box_plus_minus_percentile - .5) * 1.5
+    score += (win_shares_percentile - .5) * 1.5
+    score += (value_over_replacement_percentile - .5) * 2
+    return score
+    
+'''
+Next, I created a dictionary data structure that contained a player, his score, and his team. 
+I also created an excel file in my code and wrote all the players names and their corresponding
+scores. 
+I used this dictionary for reference later in my code. 
+'''
+#assigning scores to all the players in excel file.
+wb = Workbook() 
+  
+# add_sheet is used to create sheet. 
+score_data = wb.add_sheet('Rookie_Scores') 
+
+
+
+scores = []
+
+    
+for i in range(1,301):
+    if len(data.cell_value(i,1)) == 0:
+        continue
+    score = assign_score(np_games_played, np_min_played, np_fg_perc, np_three_perc, np_avg_points, np_avg_rebounds, np_avg_assists, np_box_plus_minus, np_win_shares, np_value_over_replacement,data.cell_value(i,5),data.cell_value(i,6),data.cell_value(i,10),data.cell_value(i,11),data.cell_value(i,14),data.cell_value(i,15),data.cell_value(i,16),data.cell_value(i,17),data.cell_value(i,18),data.cell_value(i,20))
+    scores.append(score)
+
+player_score = {}
+for i in range(len(players)):
+    team = data.cell_value(i + 2,1)
+    player_score[players[i]] = scores[i],team.lower()
+    score_data.write(i,0,players[i])
+    score_data.write(i,1,scores[i])
+
+wb.save('Rookie_Scores.xls') 
+player_score
+
+players = []
+score = []
+for i in player_score:
+    players.append(i)
+    score.append(player_score[i][0])
+np_score = np.array(score)
+players_underperform = []
+mean_score = mean(score)
+for i in range(0,len(players),30):
+    if score[i] <= mean_score:
+        players_underperform.append(players[i])
+
+print("the number 1 picks from each draft who were labeled as busts are: " + str(players_underperform))
+#graph that shows success of each pick
+x = data.cell_value(2,0)
+
+pick_success = {}
+for i in range(1,31):
+    val = float(i)
+    pick_success[val] = []
+    
+for i in range(1,301):
+    if type(data.cell_value(i,0)) == str or data.cell_value(i,0) > 30:
+        continue
+    pick = data.cell_value(i,0)
+
+    player = data.cell_value(i,2)
+    pick_success[pick].append(player_score[player][0])
+    
+for i in pick_success:
+    pick_success[i] = mean(pick_success[i])
+ypos = []
+score = []
+for pick in pick_success:
+    ypos.append(pick)
+    score.append(pick_success[pick])
+    
+    
+plt.figure(figsize=(20,10))
+plt.xticks(ypos,ypos)
+plt.bar(ypos,score,label = "Score")
+plt.legend()
+plt.xlabel("Draft Pick")
+plt.ylabel("Score")
+plt.title("Avg. Score of each draft pick")
+
+wins_vs_success_data = []
+total_wins = []
+success_data = []
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    wins = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        wins.append(team_season_data.cell_value(i,3))
+    def get_team_wins(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_wins = wins[index]
+        return team_wins
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_wins.append(get_team_wins(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+#plot
+plt.scatter(total_wins,success_data)
+plt.title("Wins vs Success score")
+plt.xlabel("Total Wins")
+plt.ylabel("success score")
+#generating covariance
+np_total_wins = np.array(total_wins)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_wins, np_success_data)
+print("Correlation between data: " + str(corr))
+
+##Players success score vs team's loss's previous season scatter plot
+total_loss = []
+success_data = [] #players score data
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    loss = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        loss.append(team_season_data.cell_value(i,4))
+    def get_team_loss(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_loss = loss[index]
+        return team_loss
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_loss.append(get_team_loss(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+ 
+plt.scatter(total_loss,success_data)
+plt.title("Loss's vs Success score")
+plt.xlabel("Total Loss's")
+plt.ylabel("success score")
+#generating covariance
+np_total_loss = np.array(total_loss)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_loss, np_success_data)
+print("Correlation between data: " + str(corr))
+
+
+#Players success score vs team's points previous season scatter plot
+total_points = []
+success_data = [] #players score data
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    points = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        points.append(team_season_data.cell_value(i,7))
+    def get_team_points(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_points = points[index]
+        return team_points
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_points.append(get_team_points(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+plt.scatter(total_points,success_data)
+plt.title("Point's vs Success score")
+plt.xlabel("Avg. Point's")
+plt.ylabel("success score")
+#generating covariance
+np_total_points = np.array(total_points)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_points, np_success_data)
+print("Correlation between data: " + str(corr))
+
+
+#Players success score vs team's Field Goal Percentage previous season scatter plot
+total_field_goal = []
+success_data = [] #players score data
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    field_goal = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        field_goal.append(team_season_data.cell_value(i,10))
+    def get_team_fg(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_points = field_goal[index]
+        return team_points
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_field_goal.append(get_team_fg(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+plt.scatter(total_field_goal,success_data)
+plt.title("Point's vs Success score")
+plt.xlabel("Avg. Point's")
+plt.ylabel("success score")
+#generating covariance
+np_total_field_goal = np.array(total_field_goal)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_field_goal, np_success_data)
+print("Correlation between data: " + str(corr))
+
+#Players success score vs team's Offensive Rebounds previous season scatter plot
+total_rebounds= []
+success_data = []
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    rebounds = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        rebounds.append(team_season_data.cell_value(i,17))
+    def get_team_rebounds(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_rebounds = rebounds[index]
+        return team_rebounds
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_rebounds.append(get_team_rebounds(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+plt.scatter(total_rebounds,success_data)
+plt.title("Rebound's vs Success score")
+plt.xlabel("Avg. Rebound's")
+plt.ylabel("success score")
+#generating covariance
+np_total_rebounds = np.array(total_rebounds)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_rebounds, np_success_data)
+print("Correlation between data: " + str(corr))
+
+#Players success score vs team's Blocked Field Goal Attempts previous season scatter plot
+total_blocks= []
+success_data = []
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    blocks = []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        blocks.append(team_season_data.cell_value(i,24))
+    def get_team_blocks(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_blocks = blocks[index]
+        return team_blocks
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_blocks.append(get_team_blocks(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+plt.scatter(total_rebounds,success_data)
+plt.title("Block's vs Success score")
+plt.xlabel("Avg. Block's")
+plt.ylabel("success score")
+#generating covariance
+np_total_blocks = np.array(total_blocks)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_blocks, np_success_data)
+print("Correlation between data: " + str(corr))
+
+
+#Players success score vs team's Box plus minus previous season scatter plot
+total_Box= []
+success_data = []
+
+for page in range(1,11):
+    team_season_data = workbook.sheet_by_index(page)
+    official_roster = []
+    box= []
+    for i in range(1,31):
+        official_roster.append(team_season_data.cell_value(i,1).lower())
+        box.append(team_season_data.cell_value(i,27))
+    def get_team_box(team):
+        team = team.strip()
+        index = official_roster.index(team)
+        team_box = box[index]
+        return team_box
+    my_roster_list = []
+    scores_list = []
+    for j in range(page * 30 - 28, page * 30 + 1):
+        my_roster = data.cell_value(j-1,1)
+        my_roster_list.append(my_roster)
+        score = data.cell_value(j-1,21)
+        scores_list.append(score)
+        total_Box.append(get_team_box(my_roster.lower()))
+        success_data.append(data.cell_value(j-1,21))
+    
+plt.scatter(total_rebounds,success_data)
+plt.title("Box plus minus vs Success score")
+plt.xlabel("Box plus minus")
+plt.ylabel("success score")
+#generating covariance
+np_total_Box = np.array(total_Box)
+np_success_data = np.array(success_data)
+corr, _ = pearsonr(np_total_Box, np_success_data)
+print("Correlation between data: " + str(corr))
+
+'''
+I was then curious to see whether college performance was an indicator of success in the NBA.
+The first question I tried to answer was whether player's who didn't follow the traditional NCAA
+route were more successful in the NBA. To do this, I had to load in a new data set that contained 
+4000+ past and previous NBA players with their respective NCAA(if applicable) and NBA stats.
+'''
+file_location = ("/Users/neilpotdukhe/Library/Containers/com.microsoft.Excel/Data/Desktop/Python_Files/players.xlsx")
+
+workbook = xlrd.open_workbook(file_location)
+data = workbook.sheet_by_index(0)
+#assigning scores to all the players in excel file.
+
+df = pd.read_excel (r"/Users/neilpotdukhe/Library/Containers/com.microsoft.Excel/Data/Desktop/Python_Files/players.xlsx") 
+df.head()
+
+#loading data for computing score
+fg_perc = []
+#4577 total rows
+for i in range(1,100):
+    if type(data.cell_value(i,14)) is float: 
+        fg_perc.append(data.cell_value(i,14))
+np_fg_perc = np.array(fg_perc)
+
+games_played = []
+for i in range(1,100):
+    if type(data.cell_value(i,20)) is float: 
+        games_played.append(data.cell_value(i,20))
+np_games_played = np.array(games_played)
+
+ppg = []
+for i in range(1,100):
+    if type(data.cell_value(i,21)) is float: 
+        ppg.append(data.cell_value(i,21))
+np_ppg = np.array(ppg)
+
+#for computing a score, use the fg%, games played, points per game
+def calc_score(np_fg_perc, np_games_played, np_ppg, fg_perc, games_played, ppg):
+    fg_perc_percentile = percentileofscore(np_fg_perc,fg_perc)
+    games_played_percentile = percentileofscore(np_games_played,games_played)
+    ppg_percentile = percentileofscore(np_ppg,ppg)
+    score = (fg_perc_percentile - .5) * .2
+    score += (games_played_percentile - .5) * .4
+    score += (ppg_percentile - .5) * .4
+    return score
+
+'''
+In the following cells I compared the scores of players who went to college vs players who 
+didn't go that route.
+'''
+
+player_score = {}
+for i in range(1,4000):
+    fg = data.cell_value(i,14)
+    games = data.cell_value(i,20)
+    ppg = data.cell_value(i,21)
+    player = data.cell_value(i,6)
+    college = data.cell_value(i,4) #this parameter was a True or False 
+    if len(college) == 0:
+        college = False
+    else:
+        college = True
+    
+    if type(fg) is str or type(games) is str or type(ppg) is str:
+        continue
+    score = calc_score(np_fg_perc, np_games_played, np_ppg, fg, games, ppg)
+    player_score[player] = score,college
+college_players = []
+non_college_players = []
+for player in player_score:
+    if player_score[player][1] is True:
+        college_players.append(player_score[player][0])
+    else:
+        non_college_players.append(player_score[player][0])
+player_score
+
+np_college_players = np.array(college_players)
+np_non_college_players = np.array(non_college_players)
+college_players_mean_score = np_college_players.mean()
+non_college_players_mean_score = np_non_college_players.mean()
+plt.boxplot(college_players)
+plt.title("Box plot of the NBA scores for players who went to College")
+plt.ylabel("score")
+print("The mean score was " + str(np_college_players.mean()))
+
+plt.boxplot(non_college_players)
+plt.title("Box plot of the NBA scores for players who did not go to College")
+plt.ylabel("score")
+print("The mean score was " + str(np_non_college_players.mean()))
+
+ncaa_ppg = []
+nba_ppg = []
+for i in range(1,4000):
+    if len(data.cell_value(i,4)) == 0 or type(data.cell_value(i,33)) is str or type(data.cell_value(i,21)) is str:
+        continue
+    ncaa_ppg.append(data.cell_value(i,33))
+    nba_ppg.append(data.cell_value(i,21))
+plt.figure(figsize=(20,10))
+plt.title("NCAA vs NBA points comparision")
+plt.plot(ncaa_ppg, label = "NCAA")
+plt.plot(nba_ppg, label = "NBA")
+plt.legend()
+
+
+players_who_improved = []
+players_who_declined = []
+for i in range(len(ncaa_ppg)):
+    delta = nba_ppg[i] - ncaa_ppg[i]
+    if delta < 0:
+        players_who_declined.append(delta)
+    else:
+        players_who_improved.append(delta)
+print("The amount of players whose point total improved: " + str(len(players_who_improved)))
+print("The amount of players whose point total declined: " + str(len(players_who_declined)))
+
+print("The average increase in Point per game for players who improved is: " + 
+      str(mean(players_who_improved)))
+print("The average decrease in Point per game for players who declined is: " + 
+      str(mean(players_who_declined)))
+      
+plt.figure(figsize=(20,10))    
+plt.title("Playes who improved Points per game")
+plt.ylabel("Difference in college to NBA ppg")
+plt.plot(players_who_improved)
+        
+plt.figure(figsize=(20,10))
+plt.title("Playes who declined Points per game")
+plt.ylabel("Difference in college to NBA ppg")
+plt.plot(players_who_declined)
+
+
+ncaa_three_fg = []
+nba_three_fg= []
+for i in range(1,4000):
+    if len(data.cell_value(i,4)) == 0 or type(data.cell_value(i,11)) is str or type(data.cell_value(i,23)) is str:
+        continue
+    nba_three_fg.append(data.cell_value(i,11))
+    ncaa_three_fg.append((data.cell_value(i,23)))
+plt.figure(figsize=(20,10))
+plt.title("NCAA vs NBA 3 point % comparision")
+plt.plot(ncaa_three_fg, label = "NCAA")
+plt.plot(nba_three_fg, label = "NBA")
+plt.legend()
+avg_diff = 0
+for i in range(len(ncaa_three_fg)):
+    avg_diff = nba_three_fg[i] - ncaa_three_fg[i]
+print("The average difference between NBA 3 point % and NCAA 3 point % is " + 
+      str(avg_diff/len(ncaa_three_fg)))
+
+
+plt.scatter(ncaa_three_fg,nba_three_fg)
+plt.title("NCAA vs NBA 3 point %")
+plt.xlabel("NCAA 3 point %")
+plt.ylabel(" NBA 3 point %")
+#generating covariance
+np_ncaa_three_fg = np.array(ncaa_three_fg)
+np_nba_three_fg = np.array(nba_three_fg)
+corr, _ = pearsonr(np_ncaa_three_fg, np_nba_three_fg)
+print("Correlation between data: " + str(corr))
+
+'''
+I faced a few challenges while integratating the 2 data sets, one that contained rookie data,
+and the other contained team data fro year to year. For example, some of the team names
+were different such as LA Clippers vs Los Angeles Clippers. Another issue I ran into were 
+random spaces in between team names so I had to manually fix all of those. 
+On NBA draft day, sometimes players are picked but then immediately traded to another team, and 
+this is not displayed in my data set so I had to manually figure out and update what trades 
+occured. Another challenge I faced was that I had to match each rookie's team's season data
+with it's appropriate year.
+
+One thing I would do differntly is only use the rookie's stats from when he was on the team
+he was drafted on. For exmaple, some rookies are on a team for a year or 2 and then traded. 
+This is not quite indicative of how a team can affect rookie performance. I would also also work
+on removing some outliers in my data so I could get a better idea of the realtionship between the 
+variables. 
+
+From my results, I learned that some of the team's previous season's stats were indicative of 
+a player's success in the NBA. For example there was a correlation of 0.200920379113535 between 
+a team's loss numbers the previous season and a players success score. Another thing I learned was
+that top picks typically are more successful then players picked towards the
+end of the 1st round. The average 1st and 2nd round pick scores were 696.1083333333333 and 
+538.0833333333333, in respective order. The average last and 2nd to last round pick scores were  
+413.18333333333334 and 538.413.18333333333334, in respective order. This makes sense because 
+the more "talented players" coming into the draft are picked earlier. 
+Another thing I learned was that teams with higher number of blocks on the defensive end the 
+previous season correlated to higher success scores for players by 0.19370792871942574.
+
+I then compared the success scores of all the NBA players who went to college vs players who 
+took an alternate route to the NBA, whether it was playing overseas or coming straight from 
+high-school. The mean success score for players who went to college was 46.083120542760575.
+The mean score for players who did not go to college was 50.34634220997858 so there is a slight 
+increase. 
+I wanted to see how well players point averages translated to the NBA. The data clearly showed how
+2083 players in my dataset declined their point per game average while 166 improved their point per
+game average. The average increase in Point per game for players who improved 
+is: 2.8680722891566264. The average decrease in Point per game for players who declined is:
+-7.674603936629861. This also shows how generally, it is tougher to score in the NBA compared to
+college.
+The last statistic I wanted to see was 3 point percentage. The modern NBA is being played more
+at the 3 point line then the down low closer to the rim so I wanted to see how players 3 point 
+shooting fared in the transition from NCAA to NBA. After plotting the data, the 3 point percentage
+mostly overlapped. The average difference between NBA 3 point % and NCAA 3 point % is
+-0.00017672727272727274. This number is very close to 0 and it is safe to make the assumption that 
+3 point. There is also a correlation of 0.20564062726044852 between the 2 variables. 
+'''
